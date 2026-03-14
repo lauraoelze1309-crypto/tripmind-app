@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const API = "https://api.anthropic.com/v1/messages";
+const API = "/api/messages";
 const MODEL = "claude-sonnet-4-5-20251029";
 const INTERESTS = ["Food & Dining","Culture","History","Nightlife","Nature","Art","Shopping","Hidden Spots","Architecture","Sports","Wellness","Photography"];
 const AGE_GROUPS = ["18-25","26-40","41-60","60+","Mixed / Family"];
