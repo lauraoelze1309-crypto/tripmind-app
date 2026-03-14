@@ -285,17 +285,9 @@ function getApiKey(){ try{ return localStorage.getItem("tm_api_key")||""; }catch
 async function callAI(prompt,maxTok,attempt){
   attempt=attempt||0;
   try{
-    // Use local proxy when available, fall back to direct call with localStorage key
-    const useProxy=window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1";
-    const url=useProxy?"/api/messages":API;
+    // Always use backend proxy — API key is stored securely on the server
+    const url="/api/messages";
     const headers={"Content-Type":"application/json"};
-    if(!useProxy){
-      const k=getApiKey();
-      if(!k) throw new Error("No API key — open ⚙️ Settings and add your Claude key.");
-      headers["x-api-key"]=k;
-      headers["anthropic-version"]="2023-06-01";
-      headers["anthropic-dangerous-direct-browser-access"]="true";
-    }
     const res=await fetch(url,{method:"POST",headers,
       body:JSON.stringify({model:MODEL,max_tokens:maxTok||900,messages:[{role:"user",content:prompt}]})});
     if(!res.ok){
