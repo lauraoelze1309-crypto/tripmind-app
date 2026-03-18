@@ -2208,6 +2208,30 @@ function generatePackingList(days,form){
 }
 
 // ── Trip Screen ────────────────────────────────────────────────────────────────
+// ── Suggestion inline form (own component to keep hooks at top level) ──────────
+function SuggestionInlineForm({dayNum,destination,onSubmit}){
+  const [open,setOpen]=useState(false);
+  const [stitle,setStitle]=useState("");
+  const [snotes,setSnotes]=useState("");
+  if(!open) return(
+    <button onClick={()=>setOpen(true)} style={{width:"100%",padding:"10px",borderRadius:10,border:"1.5px dashed #C8D9E6",background:"#fff",color:"#567C8D",fontWeight:700,fontFamily:"inherit",marginTop:4,cursor:"pointer"}}>
+      + Eigenen Vorschlag einreichen
+    </button>
+  );
+  return(
+    <div style={{border:"1px solid #C8D9E6",borderRadius:12,padding:14,background:"#fff",marginTop:8}}>
+      <div style={{fontWeight:700,fontSize:".82rem",marginBottom:8,color:"#2F4156"}}>Vorschlag einreichen</div>
+      <input value={stitle} onChange={e=>setStitle(e.target.value)} placeholder="Name des Orts / Aktivität" style={{width:"100%",padding:"9px 11px",borderRadius:8,border:"1px solid #C8D9E6",fontFamily:"inherit",fontSize:".84rem",marginBottom:8,boxSizing:"border-box"}}/>
+      <textarea value={snotes} onChange={e=>setSnotes(e.target.value)} placeholder="Warum empfiehlst du das? (optional)" rows={2} style={{width:"100%",padding:"9px 11px",borderRadius:8,border:"1px solid #C8D9E6",fontFamily:"inherit",resize:"none",fontSize:".82rem",boxSizing:"border-box"}}/>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <button onClick={()=>{if(!stitle.trim())return;onSubmit({dayNumber:dayNum,title:stitle.trim(),type:"Activity",notes:snotes.trim(),destination});setStitle("");setSnotes("");setOpen(false);}}
+          style={{flex:1,padding:"9px",borderRadius:9,border:"none",background:"#2F4156",color:"#fff",fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>Einreichen</button>
+        <button onClick={()=>setOpen(false)} style={{padding:"9px 13px",borderRadius:9,border:"1px solid #C8D9E6",background:"#fff",color:"#567C8D",fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>Abbrechen</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Personality-based single-day regen prompt ─────────────────────────────────
 function buildPersonalityRegenPrompt(dayNum,totalDays,destination,form,personalityId){
   const p=TRIP_PERSONALITIES[personalityId]||TRIP_PERSONALITIES.explorer;
@@ -2454,9 +2478,19 @@ function Trip({data,form,onBack,onSave,onShare}){
   // ── Group Planning state v2 ────────────────────────────────────────────────
   const [groupState,setGroupState]=useState(()=>{
     if(tripId){try{const s=localStorage.getItem("tm_gs_"+tripId);if(s){const p=JSON.parse(s);if(p?.members) return p;}}catch(_){}}
-    return createInitialGroupState([{id:"u1",name:"Laura",role:"owner"}]);
+    return createInitialGroupState([{id:"u1",name:form?.travelers>1?"Organiser":"You",role:"owner"}]);
   });
-  const currentUserId="u1";
+  // ── currentUser: read from localStorage (set by join flow) or default to owner ─
+  const [currentUser]=useState(()=>{
+    try{
+      const stored=localStorage.getItem("tm_user_"+tripId);
+      if(stored) return JSON.parse(stored);
+    }catch(_){}
+    // Owner default — first member in groupState
+    const owner=groupState.members?.[0];
+    return{id:owner?.id||"u1",name:owner?.name||"You",avatar:(owner?.name||"Y")[0].toUpperCase()};
+  });
+  const currentUserId=currentUser.id;
   // Auto-persist groupState whenever it changes
   useEffect(()=>{ if(tripId){try{localStorage.setItem("tm_gs_"+tripId,JSON.stringify(groupState));}catch(_){}} },[groupState,tripId]);
   const planMapRef=useRef(null); // {zoomTo} from DayMap onReady
@@ -2707,14 +2741,30 @@ function Trip({data,form,onBack,onSave,onShare}){
             );
           })}
         </div>
-        {/* Sub-tabs */}
-        <div style={{display:"flex",borderBottom:"2px solid #EEE8DF",marginBottom:14,overflowX:"auto"}}>
-          {[["plan","📋 Plan"],["map","🗺️ Map"],["ai","✨ Concierge"],["group","👥 Group"],["live","🔴 Live"],["fallbacks","🌦 Weather Alt"],["packing","🎒 Packing"],["tips","💡 Tips"]].map(([id,l])=>(
-            <button key={id} onClick={()=>setTab(id)} style={{padding:"11px 14px",minHeight:44,flexShrink:0,background:"none",border:"none",borderBottom:tab===id?"2.5px solid #2F4156":"2.5px solid transparent",marginBottom:"-2px",color:tab===id?"#2F4156":"#567C8D",fontSize:".84rem",fontFamily:"inherit",fontWeight:tab===id?700:400,whiteSpace:"nowrap",position:"relative"}}>
-              {l}
-              {id==="group"&&getSuggestionsForDay(groupState,day.day||activeDay+1).filter(s=>s.status==="pending").length>0&&<span style={{position:"absolute",top:8,right:4,width:8,height:8,borderRadius:"50%",background:"#dc2626"}}/>}
-            </button>
-          ))}
+        {/* Sub-tabs + Invite button */}
+        <div style={{display:"flex",alignItems:"center",borderBottom:"2px solid #EEE8DF",marginBottom:14}}>
+          <div style={{display:"flex",overflowX:"auto",flex:1}}>
+            {[["plan","📋 Plan"],["map","🗺️ Map"],["ai","✨ Concierge"],["group","👥 Gruppe"],["live","🔴 Live"],["fallbacks","🌦 Wetter"],["packing","🎒 Koffer"],["tips","💡 Tipps"]].map(([id,l])=>(
+              <button key={id} onClick={()=>setTab(id)} style={{padding:"11px 14px",minHeight:44,flexShrink:0,background:"none",border:"none",borderBottom:tab===id?"2.5px solid #2F4156":"2.5px solid transparent",marginBottom:"-2px",color:tab===id?"#2F4156":"#567C8D",fontSize:".84rem",fontFamily:"inherit",fontWeight:tab===id?700:400,whiteSpace:"nowrap",position:"relative"}}>
+                {l}
+                {id==="group"&&getSuggestionsForDay(groupState,day.day||activeDay+1).filter(s=>s.status==="pending").length>0&&<span style={{position:"absolute",top:8,right:4,width:8,height:8,borderRadius:"50%",background:"#dc2626"}}/>}
+              </button>
+            ))}
+          </div>
+          {/* ── Invite Friends button ── */}
+          <button
+            onClick={()=>{
+              const tripId2=data.id||("trip_"+Date.now());
+              const tripToShare={...data,id:tripId2,members:[...(data.members||[{id:currentUser.id,name:currentUser.name,avatar:currentUser.avatar}])]};
+              const url=window.location.origin+window.location.pathname+"?joinTrip="+tripId2;
+              try{localStorage.setItem("tm_invite_"+tripId2,JSON.stringify(tripToShare));}catch(_){}
+              navigator.clipboard?.writeText(url)
+                .then(()=>alert("✅ Invite-Link kopiert! Sende ihn an deine Freunde:\n\n"+url))
+                .catch(()=>prompt("Kopiere diesen Link:",url));
+            }}
+            style={{flexShrink:0,marginLeft:8,marginBottom:2,padding:"7px 13px",borderRadius:20,border:"1.5px solid #2F4156",background:"#2F4156",color:"#fff",fontSize:".76rem",fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+            👥 Einladen
+          </button>
         </div>
         {/* Plan */}
         {tab==="plan"&&<div className="fu">
@@ -2935,6 +2985,47 @@ function Trip({data,form,onBack,onSave,onShare}){
                 </div>}
                 {/* Travel note display (when not editing) */}
                 {!isEditing&&a._note&&<div style={{fontSize:".74rem",color:"#567C8D",fontStyle:"italic",marginTop:4,padding:"5px 9px",background:"#EEE8DF",borderRadius:7}}>📝 {a._note}</div>}
+                {/* ── Live Vote Bar — shown whenever ≥2 members are in the group ── */}
+                {groupState.members.length>=2&&(()=>{
+                  const dayNum=day.day||activeDay+1;
+                  const voteData=(groupState.activityVotesByDay[String(dayNum)]||{})[actId]||{};
+                  const myVote=voteData[currentUserId]||0;
+                  const upVoters=Object.entries(voteData).filter(([,v])=>Number(v)>0).map(([mid])=>getMemberName(groupState,mid));
+                  const downVoters=Object.entries(voteData).filter(([,v])=>Number(v)<0).map(([mid])=>getMemberName(groupState,mid));
+                  const allVoters=[...upVoters,...downVoters];
+                  const score=upVoters.length-downVoters.length;
+                  return(
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,paddingTop:10,borderTop:"1px solid #EEE8DF",flexWrap:"wrap"}}>
+                      {/* Upvote */}
+                      <button onClick={()=>handleVoteExistingActivity(actId,myVote===1?0:1)}
+                        style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",borderColor:myVote===1?"#2F4156":"#C8D9E6",background:myVote===1?"#dceaf3":"#fff",fontWeight:700,fontSize:".76rem",cursor:"pointer",transition:"all .15s"}}>
+                        👍 {upVoters.length>0?upVoters.length:""}
+                      </button>
+                      {/* Downvote */}
+                      <button onClick={()=>handleVoteExistingActivity(actId,myVote===-1?0:-1)}
+                        style={{padding:"5px 12px",borderRadius:20,border:"1.5px solid",borderColor:myVote===-1?"#dc2626":"#C8D9E6",background:myVote===-1?"#fee2e2":"#fff",fontWeight:700,fontSize:".76rem",cursor:"pointer",transition:"all .15s"}}>
+                        👎 {downVoters.length>0?downVoters.length:""}
+                      </button>
+                      {/* Avatar row: who voted */}
+                      {allVoters.length>0&&<div style={{display:"flex",alignItems:"center",gap:3}}>
+                        {allVoters.slice(0,4).map((n,vi)=>(
+                          <div key={vi} title={n}
+                            style={{width:22,height:22,borderRadius:"50%",background:upVoters.includes(n)?"#dceaf3":"#fee2e2",border:"1.5px solid",borderColor:upVoters.includes(n)?"#567C8D":"#fca5a5",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".6rem",fontWeight:900,color:upVoters.includes(n)?"#2F4156":"#dc2626"}}>
+                            {n[0].toUpperCase()}
+                          </div>
+                        ))}
+                        {allVoters.length>4&&<span style={{fontSize:".62rem",color:"#8A9CAA"}}>+{allVoters.length-4}</span>}
+                        <span style={{fontSize:".7rem",color:"#8A9CAA",marginLeft:2}}>
+                          {allVoters.length===1?allVoters[0]:allVoters.length===2?allVoters.join(" & "):allVoters[0]+" & "+(allVoters.length-1)+" weitere"}
+                        </span>
+                      </div>}
+                      {/* Score badge */}
+                      {score!==0&&<span style={{marginLeft:"auto",fontSize:".72rem",fontWeight:800,color:score>0?"#16a34a":"#dc2626",background:score>0?"#dcfce7":"#fee2e2",padding:"2px 9px",borderRadius:20}}>
+                        {score>0?"+"+score:score}
+                      </span>}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             );
@@ -2942,6 +3033,64 @@ function Trip({data,form,onBack,onSave,onShare}){
           </div>
             );
           })()}
+          {/* ── Inline Friend Suggestions ─────────────────────────────────────── */}
+          {(()=>{
+            const dayNum=day.day||activeDay+1;
+            const pending=getSuggestionsForDay(groupState,dayNum).filter(s=>s.status==="pending");
+            if(!pending.length) return null;
+            return(
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:".68rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#8A9CAA",marginBottom:8}}>👥 Vorschläge der Gruppe</div>
+                {pending.map(s=>{
+                  const myVote=s.votes?.[currentUserId]||0;
+                  const upCount=Object.values(s.votes||{}).filter(v=>Number(v)>0).length;
+                  const downCount=Object.values(s.votes||{}).filter(v=>Number(v)<0).length;
+                  const suggestorName=getMemberName(groupState,s.createdBy);
+                  const isMine=s.createdBy===currentUserId;
+                  return(
+                    <div key={s.id} style={{border:"1.5px dashed #C8D9E6",borderRadius:12,padding:"12px 14px",marginBottom:8,background:"#F9F7F5",position:"relative"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
+                        <div style={{flex:1}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
+                            <span style={{fontWeight:800,fontSize:".88rem",color:"#2F4156"}}>{s.title}</span>
+                            {s.type&&<span style={{fontSize:".68rem",padding:"1px 7px",borderRadius:20,background:"#EEE8DF",color:"#567C8D",fontWeight:600}}>{s.type}</span>}
+                          </div>
+                          <div style={{fontSize:".72rem",color:"#567C8D"}}>
+                            💬 Vorgeschlagen von <b>{isMine?"dir":suggestorName}</b>
+                          </div>
+                          {s.notes&&<div style={{fontSize:".78rem",color:"#2F4156",marginTop:5,lineHeight:1.4}}>{s.notes}</div>}
+                        </div>
+                        {/* Vote buttons */}
+                        <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-end",flexShrink:0}}>
+                          <button onClick={()=>handleVoteSuggestion(s.id,myVote===1?0:1)}
+                            style={{padding:"4px 10px",borderRadius:20,border:"1.5px solid",borderColor:myVote===1?"#2F4156":"#C8D9E6",background:myVote===1?"#dceaf3":"#fff",fontWeight:700,fontSize:".72rem",cursor:"pointer"}}>
+                            👍 {upCount||""}
+                          </button>
+                          <button onClick={()=>handleVoteSuggestion(s.id,myVote===-1?0:-1)}
+                            style={{padding:"4px 10px",borderRadius:20,border:"1.5px solid",borderColor:myVote===-1?"#dc2626":"#C8D9E6",background:myVote===-1?"#fee2e2":"#fff",fontWeight:700,fontSize:".72rem",cursor:"pointer"}}>
+                            👎 {downCount||""}
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:7,marginTop:10,flexWrap:"wrap"}}>
+                        <button onClick={()=>{addAct({_id:uid(),name:s.title,type:s.type,desc:s.notes,_suggestedBy:suggestorName});handleSetSuggestionStatus(s.id,"approved");}}
+                          style={{padding:"6px 12px",borderRadius:8,border:"none",background:"#2F4156",color:"#fff",fontWeight:700,fontFamily:"inherit",fontSize:".75rem",cursor:"pointer"}}>
+                          ✓ Zum Tag hinzufügen
+                        </button>
+                        {isMine&&<button onClick={()=>handleDeleteSuggestion(s.id)}
+                          style={{padding:"6px 10px",borderRadius:8,border:"1px solid #C8D9E6",background:"#fff",color:"#8A9CAA",fontWeight:700,fontFamily:"inherit",fontSize:".72rem",cursor:"pointer"}}>
+                          Löschen
+                        </button>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Submit own suggestion — SuggestionInlineForm handles its own state */}
+                <SuggestionInlineForm dayNum={dayNum} destination={data.destination} onSubmit={handleAddSuggestion}/>
+              </div>
+            );
+          })()}
+
           {hiddenGemResults.length>0&&(
             <div style={{background:"#fff",border:"1px solid #C8D9E6",borderRadius:14,padding:16,marginBottom:14}}>
               <div style={{fontWeight:800,marginBottom:10}}>Hidden Gems</div>
@@ -3191,6 +3340,56 @@ function Trip({data,form,onBack,onSave,onShare}){
   );
 }
 
+// ── Join Screen — shown when a user opens an invite link ──────────────────────
+function JoinScreen({tripData,onJoin}){
+  const [name,setName]=useState("");
+  const dest=tripData?.destination||"this trip";
+  const memberCount=(tripData?.members||[]).length;
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#2C365A,#2F4156)",display:"flex",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
+      <style>{CSS}</style>
+      <div style={{background:"#fff",borderRadius:24,padding:"40px 32px",maxWidth:440,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:"3rem",marginBottom:12}}>✈️</div>
+          <h2 style={{fontSize:"1.5rem",fontWeight:900,color:"#2F4156",margin:"0 0 8px"}}>Du wurdest eingeladen!</h2>
+          <p style={{color:"#567C8D",fontSize:".9rem",lineHeight:1.6,margin:0}}>
+            Reise nach <b style={{color:"#2F4156"}}>{dest}</b>
+            {memberCount>0&&<span> · {memberCount} {memberCount===1?"Reisender":"Reisende"} dabei</span>}
+          </p>
+        </div>
+        {/* Avatar preview of existing members */}
+        {(tripData?.members||[]).length>0&&(
+          <div style={{display:"flex",justifyContent:"center",gap:-4,marginBottom:24}}>
+            {(tripData.members||[]).slice(0,5).map((m,i)=>(
+              <div key={i} title={m.name} style={{width:36,height:36,borderRadius:"50%",background:"#2F4156",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".8rem",fontWeight:800,border:"2.5px solid #fff",marginLeft:i>0?-10:0,zIndex:10-i,boxShadow:"0 2px 6px rgba(0,0,0,.15)"}}>
+                {(m.avatar||m.name||"?")[0].toUpperCase()}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{marginBottom:20}}>
+          <label style={{display:"block",fontSize:".78rem",fontWeight:700,color:"#2F4156",marginBottom:8}}>Dein Name (wird der Gruppe angezeigt)</label>
+          <input
+            autoFocus
+            value={name}
+            onChange={e=>setName(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&name.trim()&&onJoin(name.trim())}
+            placeholder="z.B. Anna"
+            style={{width:"100%",padding:"14px 16px",borderRadius:12,border:"2px solid #C8D9E6",fontSize:"1rem",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}
+          />
+        </div>
+        <button
+          disabled={!name.trim()}
+          onClick={()=>name.trim()&&onJoin(name.trim())}
+          style={{width:"100%",padding:"15px",borderRadius:12,border:"none",background:name.trim()?"#2F4156":"#C8D9E6",color:"#fff",fontWeight:800,fontSize:"1rem",fontFamily:"inherit",cursor:name.trim()?"pointer":"default",transition:"background .15s"}}>
+          Dem Trip beitreten →
+        </button>
+        <p style={{textAlign:"center",fontSize:".68rem",color:"#8A9CAA",marginTop:14,margin:"14px 0 0"}}>Kein Account nötig · Name wird nur innerhalb der Gruppe gesehen</p>
+      </div>
+    </div>
+  );
+}
+
 // ── First-run setup screen (only shown if server has no API key yet) ───────────
 function SetupKeyScreen({onDone}){
   const [key,setKey]=useState("");
@@ -3258,6 +3457,8 @@ export default function App(){
     try{ const s=localStorage.getItem("tm_saved"); return s?JSON.parse(s):[]; }catch(_){ return []; }
   });
   const [needsSetup,setNeedsSetup]=useState(false);
+  // ── Join flow: replaces window.prompt ─────────────────────────────────────
+  const [joinData,setJoinData]=useState(null); // {trip, joinId}
   // Auto-persist savedTrips to localStorage
   useEffect(()=>{
     try{ localStorage.setItem("tm_saved",JSON.stringify(savedTrips)); }catch(_){}
@@ -3298,14 +3499,8 @@ export default function App(){
           }catch(_){}
         }
         if(foundTrip){
-          const name=window.prompt("You were invited to a trip to "+foundTrip.destination+"! What is your name?");
-          if(name?.trim()){
-            const newMember={id:uid(),name:name.trim(),avatar:name.trim()[0].toUpperCase()};
-            const updatedTrip={...foundTrip,members:[...(foundTrip.members||[{id:"u1",name:"Organiser",avatar:"O"}]),newMember]};
-            setItinerary(updatedTrip);
-            setCurrentForm(updatedTrip._form||{});
-            setScreen("trip");
-          }
+          // Show JoinScreen instead of window.prompt
+          setJoinData({trip:foundTrip,joinId});
         } else {
           alert("Trip not found or link has expired.");
         }
@@ -3314,6 +3509,17 @@ export default function App(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   if(needsSetup) return <SetupKeyScreen onDone={()=>setNeedsSetup(false)}/>;
+  // ── Join screen — shown when user opens invite link ────────────────────────
+  if(joinData) return <JoinScreen tripData={joinData.trip} onJoin={(name)=>{
+    const newMember={id:uid(),name:name.trim(),avatar:name.trim()[0].toUpperCase()};
+    const updatedTrip={...joinData.trip,members:[...(joinData.trip.members||[{id:"u1",name:"Organiser",avatar:"O"}]),newMember]};
+    // Persist new member identity under this tripId so Trip can read it
+    try{localStorage.setItem("tm_user_"+(updatedTrip.id||joinData.joinId),JSON.stringify(newMember));}catch(_){}
+    setItinerary(updatedTrip);
+    setCurrentForm(updatedTrip._form||{});
+    setJoinData(null);
+    setScreen("trip");
+  }}/>;
 
 
 // ── Real weather via Open-Meteo (free, no key) ────────────────────────────────
