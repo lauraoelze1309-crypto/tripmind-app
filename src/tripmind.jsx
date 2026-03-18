@@ -558,11 +558,40 @@ Constraints: suggestions 0-4, quickActions 0-4.
 Trip context: destination:${JSON.stringify(destination||"")} hotel:${JSON.stringify(hotel||"")} travelers:${JSON.stringify(travelers??"")} ageGroup:${JSON.stringify(ageGroup||"")} style:${JSON.stringify(style||"")} interests:${JSON.stringify(interests||[])} activeDayIndex:${JSON.stringify(activeDayIndex)} currentDay:${JSON.stringify(day)} allDaysSummary:${JSON.stringify((allDays||[]).map(d=>({day:d.day,theme:d.theme||"",weatherForecast:d.weatherForecast||""})))} userLocation:${JSON.stringify(userLoc||null)} rainyContext:${JSON.stringify(rainy)}
 User request: ${JSON.stringify(userMessage||"")}`.trim();
 }
-async function askTravelConcierge({apiKey,destination,hotel,currentDay,allDays,activeDayIndex,userMessage,userLoc,travelers,ageGroup,style,interests}){
-  if(!apiKey) throw new Error("Missing Claude API key");
+// ── Concierge API call — uses /api/chat (server-side key, never in browser) ────
+async function callConciergeAPI(prompt,maxTok=1200,attempt=0){
+  try{
+    const res=await fetch("/api/chat",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({messages:[{role:"user",content:prompt}],max_tokens:maxTok})
+    });
+    if(!res.ok){
+      const t=await res.text().catch(()=>"");
+      if((res.status>=500)&&attempt<2){
+        await new Promise(r=>setTimeout(r,1500*(attempt+1)));
+        return callConciergeAPI(prompt,maxTok,attempt+1);
+      }
+      throw new Error("Concierge API "+res.status+(t?": "+t.slice(0,120):""));
+    }
+    const data=await res.json();
+    if(data.error) throw new Error(data.error||"AI error");
+    const raw=(data.content||[]).map(b=>b.text||"").join("");
+    if(!raw.trim()) throw new Error("Empty concierge response");
+    return repairJSON(raw);
+  }catch(err){
+    if((err.name==="TypeError"||/fetch|network/i.test(err.message))&&attempt<2){
+      await new Promise(r=>setTimeout(r,1500*(attempt+1)));
+      return callConciergeAPI(prompt,maxTok,attempt+1);
+    }
+    throw err;
+  }
+}
+
+async function askTravelConcierge({destination,hotel,currentDay,allDays,activeDayIndex,userMessage,userLoc,travelers,ageGroup,style,interests}){
   if(!userMessage?.trim()) throw new Error("Message is empty");
   const prompt=buildConciergePrompt({destination,hotel,currentDay,allDays,activeDayIndex,userMessage,userLoc,travelers,ageGroup,style,interests});
-  const data=await callAI(prompt,1200,0,apiKey);
+  const data=await callConciergeAPI(prompt,1200);
   return{
     answerTitle:data.answerTitle||"TripMind Concierge",
     answerText:data.answerText||"",
@@ -1151,18 +1180,15 @@ function ApiKeyCard(){
   );
 }
 
-// ── Settings Card (API key + optional Supabase sync) ──────────────────────────
+// ── Settings Card (Supabase sync only — API key lives on server, not here) ─────
 function SbConfigCard(){
   const [open,setOpen]=useState(false);
-  const [apiKey,setApiKey]=useState(()=>{ try{ return localStorage.getItem("tm_api_key")||""; }catch(_){ return ""; } });
   const [url,setUrl]=useState(()=>{ try{ return localStorage.getItem("tm_sb_url")||""; }catch(_){ return ""; } });
   const [sbKey,setSbKey]=useState(()=>{ try{ return localStorage.getItem("tm_sb_key")||""; }catch(_){ return ""; } });
   const [saved,setSaved]=useState(false);
   const connected=!!(url&&sbKey);
-  const hasKey=!!apiKey;
   function save(){
     try{
-      localStorage.setItem("tm_api_key",apiKey.trim());
       localStorage.setItem("tm_sb_url",url.trim());
       localStorage.setItem("tm_sb_key",sbKey.trim());
     }catch(_){}
@@ -1175,31 +1201,24 @@ function SbConfigCard(){
     setUrl(""); setSbKey("");
   }
   return(
-    <div style={{marginBottom:12,border:"1px solid "+(hasKey?"#C8D9E6":"#fca5a5"),borderRadius:14,overflow:"hidden",background:"#fff"}}>
+    <div style={{marginBottom:12,border:"1px solid #C8D9E6",borderRadius:14,overflow:"hidden",background:"#fff"}}>
       <button onClick={()=>setOpen(x=>!x)} style={{width:"100%",padding:"13px 16px",background:"none",border:"none",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",fontFamily:"inherit"}}>
         <div style={{display:"flex",alignItems:"center",gap:9}}>
-          <div style={{width:8,height:8,borderRadius:"50%",background:hasKey?"#567C8D":"#dc2626",flexShrink:0}}/>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"#567C8D",flexShrink:0}}/>
           <div style={{textAlign:"left"}}>
             <div style={{fontSize:".82rem",fontWeight:700,color:"#2F4156"}}>⚙️ Settings</div>
-            <div style={{fontSize:".67rem",color:hasKey?"#8A9CAA":"#dc2626",marginTop:1}}>
-              {hasKey?"API key configured — ready to generate trips":"API key required — tap to configure"}
+            <div style={{fontSize:".67rem",color:"#8A9CAA",marginTop:1}}>
+              {connected?"Real-time sync active":"Optional: enable real-time sync with companions"}
             </div>
           </div>
         </div>
         <span style={{fontSize:".75rem",color:"#8A9CAA",transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}>▼</span>
       </button>
       {open&&<div style={{padding:"0 16px 16px",borderTop:"1px solid #EEE8DF",display:"flex",flexDirection:"column",gap:10}}>
-        {/* Claude API Key */}
         <div style={{paddingTop:10}}>
-          <div style={{fontSize:".7rem",fontWeight:700,color:"#2F4156",marginBottom:4}}>🔑 Claude API Key</div>
-          <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="sk-ant-…" style={{width:"100%",padding:"9px 11px",borderRadius:8,border:`1.5px solid ${apiKey?"#567C8D":"#fca5a5"}`,fontSize:".78rem",background:"#EEE8DF",fontFamily:"inherit"}}/>
-          <div style={{fontSize:".65rem",color:"#8A9CAA",marginTop:4}}>Get yours free at <b>console.anthropic.com</b> — stored only in this browser</div>
-        </div>
-        {/* Divider */}
-        <div style={{borderTop:"1px solid #EEE8DF",paddingTop:10}}>
           <div style={{fontSize:".7rem",fontWeight:700,color:"#2F4156",marginBottom:6}}>☁️ Real-time Sync (optional)</div>
           <div style={{fontSize:".72rem",color:"#567C8D",lineHeight:1.5,marginBottom:8}}>
-            Create a free project at <b>supabase.com</b>, add a <code>trips</code> table with <code>id</code> (text), <code>days</code> (jsonb), <code>updated_at</code> (timestamp) to sync with travel companions.
+            Create a free project at <b>supabase.com</b>, add a <code>trips</code> table with <code>id</code> (text), <code>days</code> (jsonb), <code>updated_at</code> (timestamp) to sync your plan with travel companions in real time.
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" style={{width:"100%",padding:"9px 11px",borderRadius:8,border:"1.5px solid #C8D9E6",fontSize:".78rem",background:"#EEE8DF",fontFamily:"inherit"}}/>
@@ -2244,7 +2263,7 @@ function Trip({data,form,onBack,onSave,onShare}){
   const [conciergeMsg,setConciergeMsg]=useState("");
   const [conciergeReply,setConciergeReply]=useState(null);
   const [conciergeLoading,setConciergeLoading]=useState(false);
-  const [conciergeApiKey,setConciergeApiKey]=useState(()=>{try{return localStorage.getItem("tm_api_key")||"";}catch(_){return "";}});
+  // conciergeApiKey removed — API key lives on the server via /api/chat, never in the browser
   const [gemsMode,setGemsMode]=useState(false);
   const [routeOptLoading,setRouteOptLoading]=useState(false);
   const [hiddenGemResults,setHiddenGemResults]=useState([]);
@@ -2410,7 +2429,7 @@ function Trip({data,form,onBack,onSave,onShare}){
     const q=(msg||conciergeMsg).trim(); if(!q) return;
     setConciergeLoading(true); setConciergeReply(null);
     try{
-      const reply=await askTravelConcierge({apiKey:conciergeApiKey||getApiKey(),destination:data.destination,hotel:form.hotel,currentDay:day,allDays:days,activeDayIndex:activeDay,userMessage:q,userLoc,travelers:form.travelers,ageGroup:form.ageGroup,style:form.style,interests:form.interests});
+      const reply=await askTravelConcierge({destination:data.destination,hotel:form.hotel,currentDay:day,allDays:days,activeDayIndex:activeDay,userMessage:q,userLoc,travelers:form.travelers,ageGroup:form.ageGroup,style:form.style,interests:form.interests});
       setConciergeReply(reply);
     }catch(e){alert(e.message||"Concierge failed");}
     finally{setConciergeLoading(false);}
