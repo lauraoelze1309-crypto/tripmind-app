@@ -2540,6 +2540,8 @@ function Trip({data,form,onBack,onSave,onShare}){
     return{id:owner?.id||"u1",name:owner?.name||"You",avatar:(owner?.name||"Y")[0].toUpperCase()};
   });
   const currentUserId=currentUser.id;
+  // Group features are only shown once at least one other person has joined
+  const isGroupTrip=groupState.members.length>=2;
   // Auto-persist groupState whenever it changes
   useEffect(()=>{ if(tripId){try{localStorage.setItem("tm_gs_"+tripId,JSON.stringify(groupState));}catch(_){}} },[groupState,tripId]);
   const planMapRef=useRef(null); // {zoomTo} from DayMap onReady
@@ -2821,15 +2823,15 @@ function Trip({data,form,onBack,onSave,onShare}){
         {/* Sub-tabs + Invite button */}
         <div style={{display:"flex",alignItems:"center",borderBottom:"2px solid #EEE8DF",marginBottom:14}}>
           <div style={{display:"flex",overflowX:"auto",flex:1}}>
-            {[["plan","📋 Plan"],["map","🗺️ Map"],["ai","✨ Concierge"],["group","👥 Gruppe"],["live","🔴 Live"],["fallbacks","🌦 Wetter"],["packing","🎒 Koffer"],["tips","💡 Tipps"]].map(([id,l])=>(
+            {[["plan","📋 Plan"],["map","🗺️ Map"],["ai","✨ Concierge"],...(isGroupTrip?[["group","👥 Gruppe"]]:[]),["live","🔴 Live"],["fallbacks","🌦 Wetter"],["packing","🎒 Koffer"],["tips","💡 Tipps"]].map(([id,l])=>(
               <button key={id} onClick={()=>setTab(id)} style={{padding:"11px 14px",minHeight:44,flexShrink:0,background:"none",border:"none",borderBottom:tab===id?"2.5px solid #2F4156":"2.5px solid transparent",marginBottom:"-2px",color:tab===id?"#2F4156":"#567C8D",fontSize:".84rem",fontFamily:"inherit",fontWeight:tab===id?700:400,whiteSpace:"nowrap",position:"relative"}}>
                 {l}
                 {id==="group"&&getSuggestionsForDay(groupState,day.day||activeDay+1).filter(s=>s.status==="pending").length>0&&<span style={{position:"absolute",top:8,right:4,width:8,height:8,borderRadius:"50%",background:"#dc2626"}}/>}
               </button>
             ))}
           </div>
-          {/* ── Invite Friends button ── */}
-          <button
+          {/* ── Invite Friends button — only shown in group trips ── */}
+          {isGroupTrip&&<button
             onClick={()=>{
               const tripId2=data.id||("trip_"+Date.now());
               const tripToShare={...data,id:tripId2,members:[...(data.members||[{id:currentUser.id,name:currentUser.name,avatar:currentUser.avatar}])]};
@@ -2841,7 +2843,7 @@ function Trip({data,form,onBack,onSave,onShare}){
             }}
             style={{flexShrink:0,marginLeft:8,marginBottom:2,padding:"7px 13px",borderRadius:20,border:"1.5px solid #2F4156",background:"#2F4156",color:"#fff",fontSize:".76rem",fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
             👥 Einladen
-          </button>
+          </button>}
         </div>
         {/* Plan */}
         {tab==="plan"&&<div className="fu">
@@ -3150,8 +3152,8 @@ function Trip({data,form,onBack,onSave,onShare}){
           </div>
             );
           })()}
-          {/* ── Inline Friend Suggestions ─────────────────────────────────────── */}
-          {(()=>{
+          {/* ── Inline Friend Suggestions — only in group trips ──────────────── */}
+          {isGroupTrip&&(()=>{
             const dayNum=day.day||activeDay+1;
             const pending=getSuggestionsForDay(groupState,dayNum).filter(s=>s.status==="pending");
             if(!pending.length) return null;
@@ -3328,8 +3330,8 @@ function Trip({data,form,onBack,onSave,onShare}){
             </div>}
           </div>}
         </div>}
-        {/* Group tab */}
-        {tab==="group"&&<GroupPlanningPanel
+        {/* Group tab — only rendered when ≥2 members */}
+        {tab==="group"&&isGroupTrip&&<GroupPlanningPanel
           groupState={groupState}
           currentDay={day}
           currentUserId={currentUserId}
