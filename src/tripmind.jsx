@@ -2189,6 +2189,42 @@ function generatePackingList(days,form){
 }
 
 // ── Trip Screen ────────────────────────────────────────────────────────────────
+// ── Personality-based single-day regen prompt ─────────────────────────────────
+function buildPersonalityRegenPrompt(dayNum,totalDays,destination,form,personalityId){
+  const p=TRIP_PERSONALITIES[personalityId]||TRIP_PERSONALITIES.explorer;
+  const interests=(form?.interests||[]).join(", ")||"general sightseeing";
+  const travelers=form?.travelers||1;
+  const travelerStr=travelers>1?`Group of ${travelers} travellers`:`Solo traveller`;
+  const travelStyle=form?.style||"medium";
+  const hotel=form?.hotel||"";
+  const hotelLine=hotel?`Hotel: ${hotel}.`:"";
+  // Transit constraints
+  const isFirst=dayNum===1,isLast=dayNum===totalDays;
+  const parts=[];
+  if(isFirst&&form?.arrivalTime) parts.push(`Arrival at ${form.arrivalTime}. Only start activities at least 1h after arrival.`);
+  if(isLast&&form?.departureTime) parts.push(`Departure at ${form.departureTime}. Last activity must end 2h before departure.`);
+  const tc=parts.join(" ");
+  const numActs=isFirst||isLast?3:5;
+  // ── Safety rule ──
+  const safetyRule="SAFETY RULE — MANDATORY: Never suggest adult entertainment, strip clubs, brothels, erotic or sexual services, sex shops, peep shows, or red-light district venues. All suggestions must be family-safe and culturally respectful. Relaxed or Luxury personalities mean wellness spa, yoga, nature walks, fine dining — never adult venues. This rule overrides everything else.";
+  return "You are a travel expert. Respond ONLY with a single JSON object — no markdown, no extra text.\n"
+    +safetyRule+"\n"
+    +`Plan day ${dayNum} of ${totalDays} in ${destination}. ${travelerStr}. Style: ${travelStyle}. Interests: ${interests}. ${hotelLine} ${tc}\n`
+    +`PERSONALITY: ${p.label} — ${p.description} Pace: ${p.pace}. Dining: ${p.diningStyle}. Activity focus: ${p.activityBias.join(", ")}.\n`
+    +"Only include activities open at scheduled time (museums 09-18, bars 20+, restaurants: lunch 12-15, dinner 19-23).\n"
+    +`Include exactly ${numActs} activities. Make them specific, authentic, and personality-appropriate.\n`
+    +"Return exactly:\n"
+    +'{"day":'+dayNum+',"theme":"short 3-word theme","neighborhood":"area name",'
+    +'"weatherForecast":"Sunny 22C","timeWindow":"09:00-22:00",'
+    +'"budget":{"budget":"50 EUR","medium":"100 EUR","luxury":"200 EUR"},'
+    +'"evening":"one sentence evening suggestion",'
+    +'"lunch":{"name":"place","cuisine":"type","price":"15 EUR","desc":"short","imgQuery":"food keyword"},'
+    +'"dinner":{"name":"place","cuisine":"type","price":"25 EUR","desc":"short","imgQuery":"food keyword"},'
+    +'"activities":[{"time":"09:00","name":"place name","type":"Museum","desc":"very short desc",'
+    +'"address":"street, city","duration":"2h","price":"12 EUR","isFree":false,"isHidden":false,'
+    +'"openHours":"09:00-18:00","tip":"short insider tip","transport":"Metro line X","imgQuery":"3 words"}]}';
+}
+
 function Trip({data,form,onBack,onSave,onShare}){
   const tripId=data.id||data._tripId||null;
   const {days,setDays,setDaysLocal,addActivity,removeActivity,reorderActivities,replaceDays,syncStatus,syncError,cloudEnabled}=useTripSync(
@@ -2214,6 +2250,58 @@ function Trip({data,form,onBack,onSave,onShare}){
   const [hiddenGemResults,setHiddenGemResults]=useState([]);
   const [personalityId,setPersonalityId]=useState(()=>{try{return localStorage.getItem("tm_personality")||getDefaultPersonalityFromForm(form);}catch(_){return getDefaultPersonalityFromForm(form);}});
   function savePersonality(id){setPersonalityId(id);try{localStorage.setItem("tm_personality",id);}catch(_){}}
+
+  // ── Reactive personality: save + immediately regenerate active day via AI ──
+  async function handlePersonalityChange(newId){
+    if(regenLoading) return; // ignore double-clicks while generating
+    savePersonality(newId);
+    setRegenLoading(true);
+    const dest=data.destination;
+    const dayNum=activeDay+1;
+    const total=days.length;
+    const prompt=buildPersonalityRegenPrompt(dayNum,total,dest,form,newId);
+    try{
+      const dayData=await callAI(prompt,950);
+      if(!dayData||!Array.isArray(dayData.activities)) throw new Error("No activities");
+      const newActs=(dayData.activities||[]).map(a=>({_id:uid(),...a}));
+      const dIdx=activeDay;
+      replaceDays(prev=>prev.map((d,i)=>i!==dIdx?d:{
+        ...d,
+        activities:newActs,
+        ...(dayData.theme?{theme:dayData.theme}:{}),
+        ...(dayData.neighborhood?{neighborhood:dayData.neighborhood}:{}),
+        ...(dayData.evening?{evening:dayData.evening}:{}),
+        ...(dayData.lunch?{lunch:dayData.lunch}:{}),
+        ...(dayData.dinner?{dinner:dayData.dinner}:{}),
+      }));
+      // Geocode new activities in background so map updates with real coords
+      const geo=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
+      const sleep=(ms)=>new Promise(res=>setTimeout(res,ms));
+      (async()=>{
+        let cityCenter=null;
+        const cityData=await geo(dest);
+        if(cityData&&cityData[0]) cityCenter={lat:+cityData[0].lat,lng:+cityData[0].lon};
+        for(let ai=0;ai<newActs.length;ai++){
+          const act=newActs[ai];
+          const q=(act.address?act.address+", ":"")+act.name+", "+dest;
+          const d=await geo(q);
+          let lat,lng;
+          if(d&&d[0]){lat=+d[0].lat;lng=+d[0].lon;}
+          else if(cityCenter){lat=cityCenter.lat+0.002*(ai+1);lng=cityCenter.lng+0.002*(ai+1);}
+          if(lat!==undefined){
+            const actId=act._id;
+            replaceDays(prev=>prev.map((dd,i)=>i!==dIdx?dd:{
+              ...dd,activities:dd.activities.map(a=>a._id===actId?{...a,lat,lng}:a)
+            }));
+          }
+          if(ai<newActs.length-1) await sleep(300);
+        }
+      })();
+    }catch(err){
+      console.error("Personality regen failed:",err);
+    }
+    setRegenLoading(false);
+  }
   // ── Inline editor ──────────────────────────────────────────────────────────
   const [editingActId,setEditingActId]=useState(null);
   const [editDraft,setEditDraft]=useState({});
@@ -2225,6 +2313,8 @@ function Trip({data,form,onBack,onSave,onShare}){
   // ── Budget limit ───────────────────────────────────────────────────────────
   const [budgetLimit,setBudgetLimit]=useState(()=>{try{const v=localStorage.getItem("tm_budget_limit");return v?Number(v):null;}catch(_){return null;}});
   const [showBudgetInput,setShowBudgetInput]=useState(false);
+  // ── Personality regen ──────────────────────────────────────────────────────
+  const [regenLoading,setRegenLoading]=useState(false);
   // ── Packing list ───────────────────────────────────────────────────────────
   const [packingChecked,setPackingChecked]=useState({});
   const day=days[activeDay]||{};
@@ -2627,13 +2717,24 @@ function Trip({data,form,onBack,onSave,onShare}){
 
           {/* ── Trip Personality picker ── */}
           <div style={{background:"#fff",border:"1px solid #C8D9E6",borderRadius:14,padding:18,marginBottom:14}}>
-            <div style={{fontWeight:800,marginBottom:10}}>Trip Personality</div>
-            <div style={{fontSize:".82rem",color:"#567C8D",marginBottom:12}}>Choose the vibe of the whole trip. This affects pace, activity style, dining, and day structure.</div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+              <span style={{fontWeight:800}}>Trip Personality</span>
+              {regenLoading&&<span style={{fontSize:".72rem",fontWeight:700,color:"#567C8D",background:"#dceaf3",borderRadius:20,padding:"3px 10px",animation:"pulse 1.2s ease-in-out infinite"}}>✨ Generating…</span>}
+            </div>
+            <div style={{fontSize:".82rem",color:"#567C8D",marginBottom:12}}>Switch personality to instantly regenerate today's activities with a new vibe.</div>
             <div style={{display:"grid",gap:10}}>
               {Object.values(TRIP_PERSONALITIES).map(p=>(
-                <button key={p.id} onClick={()=>savePersonality(p.id)}
-                  style={{textAlign:"left",padding:"14px 15px",borderRadius:12,border:personalityId===p.id?"1.5px solid #2F4156":"1.5px solid #C8D9E6",background:personalityId===p.id?"#dceaf3":"#F9F7F5",color:"#2F4156",fontFamily:"inherit",cursor:"pointer"}}>
-                  <div style={{fontWeight:800}}>{p.label}</div>
+                <button key={p.id}
+                  onClick={()=>handlePersonalityChange(p.id)}
+                  disabled={regenLoading}
+                  style={{textAlign:"left",padding:"14px 15px",borderRadius:12,
+                    border:personalityId===p.id?"1.5px solid #2F4156":"1.5px solid #C8D9E6",
+                    background:personalityId===p.id?"#dceaf3":"#F9F7F5",
+                    color:"#2F4156",fontFamily:"inherit",
+                    cursor:regenLoading?"not-allowed":"pointer",
+                    opacity:regenLoading&&personalityId!==p.id?.55:1,
+                    transition:"opacity .2s,background .2s,border .2s"}}>
+                  <div style={{fontWeight:800}}>{p.label}{personalityId===p.id&&regenLoading?" ⟳":""}</div>
                   <div style={{fontSize:".78rem",color:"#567C8D",marginTop:4}}>{p.description}</div>
                 </button>
               ))}
@@ -2746,7 +2847,15 @@ function Trip({data,form,onBack,onSave,onShare}){
             const conflicts=detectTimeConflicts(acts);
             const conflictAt=new Set(conflicts.map(c=>c.indexB));
             return(
-          <div>
+          <div style={{position:"relative"}}>
+          {/* Loading overlay while personality regen is running */}
+          {regenLoading&&(
+            <div style={{position:"absolute",inset:0,zIndex:20,borderRadius:14,background:"rgba(249,247,245,.88)",backdropFilter:"blur(3px)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,minHeight:160}}>
+              <div style={{width:36,height:36,border:"4px solid #C8D9E6",borderTopColor:"#2F4156",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+              <div style={{fontWeight:700,color:"#2F4156",fontSize:".9rem"}}>Regenerating activities…</div>
+              <div style={{fontSize:".78rem",color:"#567C8D"}}>Crafting a {TRIP_PERSONALITIES[personalityId]?.label||""} day for you</div>
+            </div>
+          )}
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
             <button onClick={optimizeCurrentDayRoute} disabled={routeLoading} style={{padding:"10px 14px",borderRadius:10,border:"none",background:"#2F4156",color:"#fff",fontWeight:700,fontFamily:"inherit",opacity:routeLoading?.6:1}}>{routeLoading?"Optimizing...":"Optimize Route"}</button>
           </div>
