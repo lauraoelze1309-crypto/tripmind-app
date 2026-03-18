@@ -2830,8 +2830,8 @@ function Trip({data,form,onBack,onSave,onShare}){
               </button>
             ))}
           </div>
-          {/* ── Invite Friends button — only shown in group trips ── */}
-          {isGroupTrip&&<button
+          {/* ── Invite Friends button — always visible ── */}
+          <button
             onClick={()=>{
               const tripId2=data.id||("trip_"+Date.now());
               const tripToShare={...data,id:tripId2,members:[...(data.members||[{id:currentUser.id,name:currentUser.name,avatar:currentUser.avatar}])]};
@@ -2843,7 +2843,7 @@ function Trip({data,form,onBack,onSave,onShare}){
             }}
             style={{flexShrink:0,marginLeft:8,marginBottom:2,padding:"7px 13px",borderRadius:20,border:"1.5px solid #2F4156",background:"#2F4156",color:"#fff",fontSize:".76rem",fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
             👥 Einladen
-          </button>}
+          </button>
         </div>
         {/* Plan */}
         {tab==="plan"&&<div className="fu">
