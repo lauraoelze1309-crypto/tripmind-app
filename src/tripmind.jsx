@@ -2208,6 +2208,56 @@ function generatePackingList(days,form){
 }
 
 // ── Trip Screen ────────────────────────────────────────────────────────────────
+
+// ── Transit URL helpers (Live Mode) ────────────────────────────────────────────
+const TRANSIT_SITES={
+  paris:"https://www.ratp.fr/en/plan-your-journey",
+  london:"https://tfl.gov.uk/plan-a-journey/",
+  berlin:"https://www.bvg.de/en",
+  amsterdam:"https://9292.nl/en",
+  vienna:"https://www.wienerlinien.at/en",
+  rome:"https://www.atac.roma.it/en",
+  barcelona:"https://www.tmb.cat/en/home",
+  madrid:"https://www.crtm.es/en/",
+  lisbon:"https://www.carris.pt/en/",
+  prague:"https://www.dpp.cz/en",
+  budapest:"https://bkk.hu/en/",
+  copenhagen:"https://www.rejseplanen.dk/en/",
+  stockholm:"https://sl.se/en",
+  oslo:"https://ruter.no/en/",
+  zurich:"https://www.zvv.ch/en/",
+  munich:"https://www.mvv-muenchen.de/en/",
+  hamburg:"https://www.hvv.de/en",
+  tokyo:"https://www.tokyometro.jp/en/",
+  osaka:"https://www.osakametro.co.jp/en/",
+  "new york":"https://www.mta.info/",
+  "san francisco":"https://www.bart.gov/",
+  chicago:"https://www.transitchicago.com/",
+  singapore:"https://www.transitlink.com.sg/",
+  "hong kong":"https://www.mtr.com.hk/en/",
+  seoul:"https://www.seoulmetro.co.kr/en/",
+  sydney:"https://transportnsw.info/",
+  melbourne:"https://www.ptv.vic.gov.au/",
+};
+function getLocalTransitUrl(destination){
+  if(!destination) return null;
+  const d=destination.toLowerCase();
+  for(const [city,url] of Object.entries(TRANSIT_SITES)){
+    if(d.includes(city)) return url;
+  }
+  return null;
+}
+function buildTransitUrl(userLoc,toAct,destination){
+  if(!toAct) return null;
+  const destStr=toAct.address?`${toAct.name}, ${toAct.address}`:`${toAct.name}, ${destination||""}`;
+  const destEnc=encodeURIComponent(destStr);
+  if(userLoc?.lat&&userLoc?.lng){
+    const origin=encodeURIComponent(`${userLoc.lat},${userLoc.lng}`);
+    return`https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destEnc}&travelmode=transit`;
+  }
+  return`https://www.google.com/maps/dir/?api=1&destination=${destEnc}&travelmode=transit`;
+}
+
 // ── Suggestion inline form (own component to keep hooks at top level) ──────────
 function SuggestionInlineForm({dayNum,destination,onSubmit}){
   const [open,setOpen]=useState(false);
@@ -2495,6 +2545,19 @@ function Trip({data,form,onBack,onSave,onShare}){
   useEffect(()=>{ if(tripId){try{localStorage.setItem("tm_gs_"+tripId,JSON.stringify(groupState));}catch(_){}} },[groupState,tripId]);
   const planMapRef=useRef(null); // {zoomTo} from DayMap onReady
   const [zoomActId,setZoomActId]=useState(null);
+  // ── Live Mode refs & derived state ────────────────────────────────────────
+  const actCardRefs=useRef({});
+  const isLiveModeDay=(()=>{
+    if(!form?.startDate) return false;
+    try{
+      const tripStart=new Date(form.startDate+"T00:00:00");
+      const dayDate=new Date(tripStart.getTime()+activeDay*86400000);
+      const today=new Date();
+      return dayDate.getFullYear()===today.getFullYear()&&dayDate.getMonth()===today.getMonth()&&dayDate.getDate()===today.getDate();
+    }catch(_){return false;}
+  })();
+  const nextStopAct=isLiveModeDay?(acts.find(a=>a.liveStatus==="live")||acts.find(a=>a.liveStatus==="soon")||null):null;
+  const nextStopId=nextStopAct?(nextStopAct._id||nextStopAct.name):null;
   function handleAddMember(memberName){ setGroupState(prev=>addGroupMember(prev,memberName)); }
   function handleRemoveMember(memberId){ setGroupState(prev=>removeGroupMember(prev,memberId)); }
   function handleAddSuggestion({dayNumber,title,type,notes,destination:dest}){
@@ -2541,6 +2604,21 @@ function Trip({data,form,onBack,onSave,onShare}){
     return()=>window.removeEventListener("keydown",onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
+  // ── Live mode: auto-scroll to next stop when day is live ──────────────────
+  useEffect(()=>{
+    if(!isLiveModeDay||!nextStopId||tab!=="plan") return;
+    const el=actCardRefs.current[nextStopId];
+    if(el) el.scrollIntoView({behavior:"smooth",block:"start"});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[isLiveModeDay,nextStopId,tab]);
+  // ── Live mode: auto-zoom map to next stop ─────────────────────────────────
+  useEffect(()=>{
+    if(!isLiveModeDay||!nextStopAct||tab!=="plan") return;
+    if(nextStopAct.lat&&nextStopAct.lng&&planMapRef.current?.zoomTo){
+      planMapRef.current.zoomTo(nextStopAct._id||nextStopAct.name);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[isLiveModeDay,nextStopId,tab]);
   // ── Inline activity editor ─────────────────────────────────────────────────
   function startEditAct(a){
     setEditingActId(a._id||a.name);
@@ -2784,6 +2862,15 @@ function Trip({data,form,onBack,onSave,onShare}){
             </div>
           </div>
 
+          {/* ── Live Mode status bar (shown on today's trip day) ── */}
+          {isLiveModeDay&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:12,background:"#dcfce7",border:"1.5px solid #86efac",marginBottom:14,flexWrap:"wrap"}}>
+            <span style={{display:"inline-block",width:9,height:9,borderRadius:"50%",background:"#22c55e",animation:"pulse 1.2s infinite",flexShrink:0}}/>
+            <span style={{fontWeight:800,fontSize:".84rem",color:"#15803d"}}>Live-Modus aktiv</span>
+            <span style={{fontSize:".76rem",color:"#166534",opacity:.8}}>— Die App zeigt dir Echtzeit-Updates für heute.</span>
+            {nextStopAct&&<span style={{marginLeft:"auto",fontSize:".74rem",fontWeight:700,background:"#fff",border:"1px solid #86efac",color:"#15803d",borderRadius:20,padding:"2px 10px",whiteSpace:"nowrap"}}>
+              {nextStopAct.liveStatus==="live"?"● Jetzt: ":"⏭ Nächstes: "}{nextStopAct.name}
+            </span>}
+          </div>}
           {/* ── Trip Personality picker ── */}
           <div style={{background:"#fff",border:"1px solid #C8D9E6",borderRadius:14,padding:18,marginBottom:14}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
@@ -2932,8 +3019,11 @@ function Trip({data,form,onBack,onSave,onShare}){
             const actId=a._id||a.name;
             const isEditing=editingActId===actId;
             const conflict=conflicts.find(c=>c.indexB===i);
+            const isNextStop=isLiveModeDay&&actId===nextStopId;
+            const isLiveNow=isLiveModeDay&&a.liveStatus==="live";
+            const isPastAct=isLiveModeDay&&(a.liveStatus==="missed_or_done"||a.liveStatus==="just_finished");
             return(
-            <div key={actId}>
+            <div key={actId} ref={el=>actCardRefs.current[actId]=el}>
               {conflict&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",margin:"4px 0",background:"#fef9c3",border:"1px solid #fde047",borderRadius:8,fontSize:".74rem",color:"#92400e",fontWeight:600}}>
                 ⚠ Conflict: {conflict.nameA} runs {conflict.overlapMins} min into {conflict.nameB}
               </div>}
@@ -2942,7 +3032,7 @@ function Trip({data,form,onBack,onSave,onShare}){
                 onDragOver={e=>e.preventDefault()}
                 onDrop={()=>onDropAt(i)}
                 onDragEnd={onDragEnd}
-                style={{marginBottom:10,borderRadius:12,opacity:dragIndex===i?.45:1,transition:"opacity .15s",cursor:"grab"}}>
+                style={{marginBottom:10,borderRadius:12,opacity:dragIndex===i?.45:isPastAct?.62:1,filter:isPastAct?"grayscale(25%)":"none",transition:"opacity .15s,filter .15s",cursor:"grab",outline:isLiveNow?"2.5px solid #22c55e":isNextStop?"2.5px solid #d97706":"none",outlineOffset:isLiveNow||isNextStop?2:0}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:6,flexWrap:"wrap",gap:4}}>
                   <div style={{fontSize:".75rem",color:"#567C8D"}}>{a.travelLabelFromPrev?`Travel: ${a.travelLabelFromPrev}`:""}</div>
                   <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
@@ -2960,6 +3050,16 @@ function Trip({data,form,onBack,onSave,onShare}){
                     </button>
                   </div>
                 </div>
+                {/* ── Live Mode banner ── */}
+                {isLiveNow&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",marginBottom:6,borderRadius:8,background:"#dcfce7",border:"1px solid #86efac"}}>
+                  <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#22c55e",animation:"pulse 1.2s infinite"}}/>
+                  <span style={{fontWeight:800,fontSize:".78rem",color:"#15803d"}}>● Live jetzt</span>
+                  {a.time&&<span style={{fontSize:".72rem",color:"#16a34a",marginLeft:"auto"}}>ab {a.time}</span>}
+                </div>}
+                {isNextStop&&!isLiveNow&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",marginBottom:6,borderRadius:8,background:"#fef9ec",border:"1px solid #fcd34d"}}>
+                  <span style={{fontWeight:800,fontSize:".78rem",color:"#b45309"}}>⏭ Nächster Halt</span>
+                  {a.time&&<span style={{fontSize:".72rem",color:"#d97706",marginLeft:"auto"}}>um {a.time}</span>}
+                </div>}
                 {i===0
                   ?<HeroActCard act={a} onRemove={removeAct} onZoom={()=>setZoomActId(actId)}/>
                   :<StoryActCard act={a} onRemove={removeAct} onZoom={()=>setZoomActId(actId)}/>}
@@ -3027,6 +3127,24 @@ function Trip({data,form,onBack,onSave,onShare}){
                   );
                 })()}
               </div>
+              {/* ── Live transit routing block ── */}
+              {isNextStop&&(()=>{
+                const gmUrl=buildTransitUrl(userLoc,a,data.destination);
+                const localUrl=getLocalTransitUrl(data.destination);
+                return(
+                  <div style={{margin:"4px 0 12px 0",padding:"10px 14px",borderRadius:10,background:"#f0f7ff",border:"1.5px solid #C8D9E6",display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:".76rem",fontWeight:700,color:"#2F4156",marginRight:4}}>🚌 So kommst du hin:</span>
+                    {gmUrl&&<a href={gmUrl} target="_blank" rel="noopener noreferrer"
+                      style={{padding:"6px 12px",borderRadius:8,background:"#2F4156",color:"#fff",fontWeight:700,fontSize:".74rem",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5}}>
+                      🗺 Google Maps Transit
+                    </a>}
+                    {localUrl&&<a href={localUrl} target="_blank" rel="noopener noreferrer"
+                      style={{padding:"6px 12px",borderRadius:8,background:"#fff",border:"1px solid #C8D9E6",color:"#567C8D",fontWeight:700,fontSize:".74rem",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5}}>
+                      🚇 Lokaler ÖPNV
+                    </a>}
+                  </div>
+                );
+              })()}
             </div>
             );
           })}
