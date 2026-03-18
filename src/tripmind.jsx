@@ -689,172 +689,146 @@ function DayMap({acts,destination,hotel,isFirstDay,isLastDay,userLoc,onRequestLo
   },[lReady,destination]);
 
   // Rebuild all markers + route whenever relevant props change
+  // cancelRef lets us abort in-flight geocoding when this effect re-fires
+  const geoAbortRef=useRef({cancelled:false});
   useEffect(()=>{
     if(!mapRef.current||!lReady) return;
+    // Cancel any previous in-flight geocoding run
+    geoAbortRef.current.cancelled=true;
+    const token={cancelled:false};
+    geoAbortRef.current=token;
+
     const L=window.L; const map=mapRef.current;
-    // Clear all non-tile layers
     map.eachLayer(l=>{if(!(l instanceof L.TileLayer))map.removeLayer(l);});
+    markerLayersRef.current={};
     setPlotting(true);
 
-    // We'll collect ALL geocoded points (hotel + acts + airport) for fitBounds
-    // Structure: {lat,lng,kind:"hotel"|"act"|"airport", act?, idx?}
     const allPoints=[];
-    let pending=0; // how many geocode requests are in flight
-    let settled=false;
+    const geo=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=3&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
+    const sleep=(ms)=>new Promise(res=>setTimeout(res,ms));
 
-    function tryFinish(){
-      pending--;
-      if(pending>0) return;
-      settled=true;
+    function renderMarkers(){
+      if(token.cancelled) return;
       setPlotting(false);
       if(!allPoints.length){ setTimeout(()=>{try{map.invalidateSize();}catch(_){}},80); return; }
 
-      // Fit map to all points
       try{
         map.fitBounds(L.latLngBounds(allPoints.map(p=>[p.lat,p.lng])),{padding:[44,44],maxZoom:15});
       }catch(_){}
 
-      // Draw route: hotel → acts in time order → (airport on last day)
-      const routePts=[];
       const hotelPt=allPoints.find(p=>p.kind==="hotel");
       const airportPt=allPoints.find(p=>p.kind==="airport");
       const actPts=[...allPoints.filter(p=>p.kind==="act")].sort((a,b)=>a.idx-b.idx);
 
+      const routePts=[];
       if(hotelPt) routePts.push([hotelPt.lat,hotelPt.lng]);
       actPts.forEach(p=>routePts.push([p.lat,p.lng]));
       if(airportPt) routePts.push([airportPt.lat,airportPt.lng]);
+      if(routePts.length>1) L.polyline(routePts,{color:"#2F4156",weight:3,dashArray:"8,5",opacity:.85}).addTo(map);
 
-      if(routePts.length>1){
-        L.polyline(routePts,{color:"#2F4156",weight:3,dashArray:"8,5",opacity:.85}).addTo(map);
-      }
-
-      // ── Hotel marker ──────────────────────────────────────────────────────
       if(hotelPt){
-        const icon=L.divIcon({className:"",
-          html:`<div style="width:42px;height:42px;border-radius:10px;background:#567C8D;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,.35);border:2.5px solid #fff;">
-            <span style="font-size:18px;line-height:1">🏨</span>
-            <span style="font-size:6px;color:#fff;font-weight:900;letter-spacing:.03em;margin-top:1px">HOTEL</span>
-          </div>`,
-          iconSize:[42,42],iconAnchor:[21,42],popupAnchor:[0,-44]});
-        L.marker([hotelPt.lat,hotelPt.lng],{icon,zIndexOffset:1000})
-          .addTo(map)
-          .bindPopup(`<div style="font-family:sans-serif;font-size:13px"><b>🏨 ${hotel}</b><div style="font-size:11px;color:#567C8D;margin-top:3px">Your hotel — day starts here</div></div>`);
+        const icon=L.divIcon({className:"",html:`<div style="width:42px;height:42px;border-radius:10px;background:#567C8D;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,.35);border:2.5px solid #fff;"><span style="font-size:18px;line-height:1">🏨</span><span style="font-size:6px;color:#fff;font-weight:900;letter-spacing:.03em;margin-top:1px">HOTEL</span></div>`,iconSize:[42,42],iconAnchor:[21,42],popupAnchor:[0,-44]});
+        L.marker([hotelPt.lat,hotelPt.lng],{icon,zIndexOffset:1000}).addTo(map).bindPopup(`<div style="font-family:sans-serif;font-size:13px"><b>🏨 ${hotel}</b><div style="font-size:11px;color:#567C8D;margin-top:3px">Your hotel — day starts here</div></div>`);
       }
 
-      // ── Activity markers ──────────────────────────────────────────────────
       actPts.forEach(p=>{
-        const act=p.act;
-        const em=typeEmoji(act.type);
-        const num=p.idx+1;
-        const icon=L.divIcon({className:"",
-          html:`<div style="position:relative;width:46px;height:46px;border-radius:50%;background:#fff;border:2.5px solid #2F4156;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.25);">
-            <span style="font-size:24px;line-height:1">${em}</span>
-            <div style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;border-radius:50%;background:#2F4156;border:2px solid #fff;display:flex;align-items:center;justify-content:center;">
-              <span style="font-size:9px;font-weight:900;color:#fff;line-height:1">${num}</span>
-            </div>
-          </div>`,
-          iconSize:[46,46],iconAnchor:[23,46],popupAnchor:[0,-48]});
+        const act=p.act; const em=typeEmoji(act.type); const num=p.idx+1;
+        const icon=L.divIcon({className:"",html:`<div style="position:relative;width:46px;height:46px;border-radius:50%;background:#fff;border:2.5px solid #2F4156;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.25);"><span style="font-size:24px;line-height:1">${em}</span><div style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;border-radius:50%;background:#2F4156;border:2px solid #fff;display:flex;align-items:center;justify-content:center;"><span style="font-size:9px;font-weight:900;color:#fff;line-height:1">${num}</span></div></div>`,iconSize:[46,46],iconAnchor:[23,46],popupAnchor:[0,-48]});
         const gyg="https://www.getyourguide.com/s/?q="+encodeURIComponent(act.name+" "+destination);
-        const popup=`<div style="font-family:sans-serif;min-width:150px;max-width:200px">
-          <div style="font-size:18px;margin-bottom:3px">${em}</div>
-          <b style="font-size:13px;color:#2C365A">${act.name}</b>
-          <div style="font-size:11px;color:#567C8D;margin-top:3px">${act.time||""}${act.duration?" · "+act.duration:""}</div>
-          ${act.address?`<div style="font-size:10px;color:#8A9CAA;margin-top:2px">📍 ${act.address}</div>`:""}
-          <div style="font-size:11px;margin-top:3px;font-weight:600;color:${act.isFree?"#567C8D":"#2F4156"}">${act.isFree?"Free":(act.price||"")}</div>
-          ${act.transport?`<div style="font-size:10px;color:#567C8D;margin-top:3px">🚌 ${act.transport}</div>`:""}
-          ${!act.isFree?`<a href="${gyg}" target="_blank" style="display:inline-block;margin-top:6px;padding:3px 10px;background:#dc2626;border-radius:4px;color:#fff;font-size:11px;font-weight:700">Book</a>`:""}
-        </div>`;
+        const popup=`<div style="font-family:sans-serif;min-width:150px;max-width:200px"><div style="font-size:18px;margin-bottom:3px">${em}</div><b style="font-size:13px;color:#2C365A">${act.name}</b><div style="font-size:11px;color:#567C8D;margin-top:3px">${act.time||""}${act.duration?" · "+act.duration:""}</div>${act.address?`<div style="font-size:10px;color:#8A9CAA;margin-top:2px">📍 ${act.address}</div>`:""}<div style="font-size:11px;margin-top:3px;font-weight:600;color:${act.isFree?"#567C8D":"#2F4156"}">${act.isFree?"Free":(act.price||"")}</div>${act.transport?`<div style="font-size:10px;color:#567C8D;margin-top:3px">🚌 ${act.transport}</div>`:""}${!act.isFree?`<a href="${gyg}" target="_blank" style="display:inline-block;margin-top:6px;padding:3px 10px;background:#dc2626;border-radius:4px;color:#fff;font-size:11px;font-weight:700">Book</a>`:""}</div>`;
         const mk=L.marker([p.lat,p.lng],{icon}).addTo(map).bindPopup(popup);
-        markerLayersRef.current[p.act._id||p.act.name]={marker:mk,lat:p.lat,lng:p.lng};
+        markerLayersRef.current[act._id||act.name]={marker:mk,lat:p.lat,lng:p.lng};
       });
+
       if(onReady) onReady({zoomTo:(actId)=>{
         const entry=markerLayersRef.current[actId];
-        if(entry&&mapRef.current){ mapRef.current.setView([entry.lat,entry.lng],16,{animate:true}); entry.marker.openPopup(); }
+        if(entry&&mapRef.current){mapRef.current.setView([entry.lat,entry.lng],16,{animate:true});entry.marker.openPopup();}
       }});
 
-      // ── Airport marker ────────────────────────────────────────────────────
       if(airportPt){
-        const icon=L.divIcon({className:"",
-          html:`<div style="width:42px;height:42px;border-radius:10px;background:#2F4156;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,.35);border:2.5px solid #fff;">
-            <span style="font-size:18px;line-height:1">✈️</span>
-            <span style="font-size:6px;color:#C8D9E6;font-weight:900;letter-spacing:.03em;margin-top:1px">AIRPORT</span>
-          </div>`,
-          iconSize:[42,42],iconAnchor:[21,42],popupAnchor:[0,-44]});
-        const label=isFirstDay&&isLastDay?"Arrival & Departure Airport":isFirstDay?"Arrival Airport":"Departure Airport";
-        L.marker([airportPt.lat,airportPt.lng],{icon,zIndexOffset:999})
-          .addTo(map)
-          .bindPopup(`<div style="font-family:sans-serif;font-size:13px"><b>✈️ ${label}</b></div>`);
+        const icon=L.divIcon({className:"",html:`<div style="width:42px;height:42px;border-radius:10px;background:#2F4156;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,.35);border:2.5px solid #fff;"><span style="font-size:18px;line-height:1">✈️</span><span style="font-size:6px;color:#C8D9E6;font-weight:900;letter-spacing:.03em;margin-top:1px">AIRPORT</span></div>`,iconSize:[42,42],iconAnchor:[21,42],popupAnchor:[0,-44]});
+        L.marker([airportPt.lat,airportPt.lng],{icon,zIndexOffset:999}).addTo(map).bindPopup(`<div style="font-family:sans-serif;font-size:13px"><b>✈️ ${isFirstDay&&isLastDay?"Arrival & Departure Airport":isFirstDay?"Arrival Airport":"Departure Airport"}</b></div>`);
       }
 
-      // ── User location dot ─────────────────────────────────────────────────
       if(userLoc){
-        const ui=L.divIcon({className:"",
-          html:'<div style="width:14px;height:14px;border-radius:50%;background:#2F4156;border:3px solid #fff;box-shadow:0 0 0 3px rgba(47,65,86,.3)"></div>',
-          iconSize:[14,14],iconAnchor:[7,7]});
+        const ui=L.divIcon({className:"",html:'<div style="width:14px;height:14px;border-radius:50%;background:#2F4156;border:3px solid #fff;box-shadow:0 0 0 3px rgba(47,65,86,.3)"></div>',iconSize:[14,14],iconAnchor:[7,7]});
         L.marker([userLoc.lat,userLoc.lng],{icon:ui}).addTo(map).bindPopup("You are here");
       }
 
       setTimeout(()=>{try{map.invalidateSize();}catch(_){}},120);
     }
 
-    // ── Sequential geocoding with 300ms delay to respect Nominatim rate limit ──
-    const geo=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
-    const sleep=(ms)=>new Promise(res=>setTimeout(res,ms));
-
     async function runAllGeocode(){
-      // Get city center as fallback for failed activity geocoding
-      let cityCenter=null;
+      // Step 1: get city center + build viewbox to constrain all searches to this region
       const cityData=await geo(destination);
+      if(token.cancelled) return;
+      let cityCenter=null;
       if(cityData&&cityData[0]) cityCenter={lat:+cityData[0].lat,lng:+cityData[0].lon};
 
-      // Hotel
-      if(hotel){
-        const d=await geo(hotel+", "+destination);
-        if(d&&d[0]) allPoints.push({lat:+d[0].lat,lng:+d[0].lon,kind:"hotel"});
+      // viewbox ±0.15° ≈ ±15 km — keeps results inside the right city
+      const vb=cityCenter
+        ?`${cityCenter.lng-0.15},${cityCenter.lat+0.15},${cityCenter.lng+0.15},${cityCenter.lat-0.15}`
+        :null;
+      // geocode within city bounds; fall back to global if nothing found
+      const geoLocal=async(q)=>{
+        if(vb){
+          const url=`https://nominatim.openstreetmap.org/search?format=json&limit=3&q=${encodeURIComponent(q)}&viewbox=${vb}&bounded=1`;
+          const d=await fetch(url).then(r=>r.json()).catch(()=>[]);
+          if(d&&d[0]) return d;
+        }
+        return geo(q);
+      };
+
+      // Step 2: hotel
+      if(!token.cancelled&&hotel){
+        const d=await geoLocal(hotel+", "+destination);
+        if(!token.cancelled&&d&&d[0]) allPoints.push({lat:+d[0].lat,lng:+d[0].lon,kind:"hotel"});
         await sleep(300);
       }
 
-      // Airport
-      if(isFirstDay||isLastDay){
+      // Step 3: airport (global search — airports often outside city viewbox)
+      if(!token.cancelled&&(isFirstDay||isLastDay)){
         const d=await geo("international airport "+destination);
-        if(d&&d[0]) allPoints.push({lat:+d[0].lat,lng:+d[0].lon,kind:"airport"});
+        if(!token.cancelled&&d&&d[0]) allPoints.push({lat:+d[0].lat,lng:+d[0].lon,kind:"airport"});
         await sleep(300);
       }
 
-      // Activities — use pre-geocoded lat/lng if stored, otherwise call Nominatim
-      if(acts&&acts.length>0){
+      // Step 4: activities
+      if(!token.cancelled&&acts&&acts.length>0){
         for(let i=0;i<acts.length;i++){
+          if(token.cancelled) return;
           const act=acts[i];
+
+          // Use pre-stored coords if they look plausible (within ~55 km of city center)
           if(act.lat&&act.lng){
-            // coords already stored by background geocoder — instant, no API call
-            allPoints.push({lat:act.lat,lng:act.lng,kind:"act",act,idx:i});
-            continue;
+            const plausible=!cityCenter||
+              (Math.abs(act.lat-cityCenter.lat)<0.5&&Math.abs(act.lng-cityCenter.lng)<0.5);
+            if(plausible){
+              allPoints.push({lat:act.lat,lng:act.lng,kind:"act",act,idx:i});
+              continue;
+            }
           }
-          const q=(act.address?act.address+", ":"")+act.name+", "+destination;
-          const d=await geo(q);
+
+          // Name-first query is most accurate; include address as additional context only when present
+          const q=act.name+(act.address?", "+act.address:"")+", "+destination;
+          const d=await geoLocal(q);
+          if(token.cancelled) return;
+
           if(d&&d[0]){
             allPoints.push({lat:+d[0].lat,lng:+d[0].lon,kind:"act",act,idx:i});
-          } else if(cityCenter){
-            const offset=0.002*(i+1);
-            allPoints.push({lat:cityCenter.lat+offset,lng:cityCenter.lng+offset,kind:"act",act,idx:i});
           }
+          // No city-center-offset fallback — a missing pin is better than a wrong one
+
           if(i<acts.length-1) await sleep(300);
         }
       }
 
-      pending=0;
-      tryFinish();
+      if(!token.cancelled) renderMarkers();
     }
 
-    pending=1; // set to 1 so tryFinish doesn't fire early
     runAllGeocode();
 
-    // If nothing to geocode at all
-    if(!hotel&&!(isFirstDay||isLastDay)&&(!acts||acts.length===0)){
-      pending=0;
-      setPlotting(false);
-      setTimeout(()=>{try{map.invalidateSize();}catch(_){}},80);
-    }
+    return()=>{ token.cancelled=true; };
   },[lReady,acts,destination,hotel,isFirstDay,isLastDay,userLoc]);
 
   // Zoom to a specific activity when requested from outside
@@ -2368,21 +2342,30 @@ function Trip({data,form,onBack,onSave,onShare}){
         ...(dayData.dinner?{dinner:dayData.dinner}:{}),
       }));
       // Geocode new activities in background so map updates with real coords
-      const geo=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
-      const sleep=(ms)=>new Promise(res=>setTimeout(res,ms));
       (async()=>{
-        let cityCenter=null;
-        const cityData=await geo(dest);
-        if(cityData&&cityData[0]) cityCenter={lat:+cityData[0].lat,lng:+cityData[0].lon};
+        const geoR=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=3&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
+        const sleep=(ms)=>new Promise(res=>setTimeout(res,ms));
+        const cityData=await geoR(dest);
+        let viewbox=null;
+        if(cityData&&cityData[0]){
+          const c={lat:+cityData[0].lat,lng:+cityData[0].lon};
+          viewbox=`${c.lng-0.15},${c.lat+0.15},${c.lng+0.15},${c.lat-0.15}`;
+        }
+        const geoLocal=async(q)=>{
+          if(viewbox){
+            const url=`https://nominatim.openstreetmap.org/search?format=json&limit=3&q=${encodeURIComponent(q)}&viewbox=${viewbox}&bounded=1`;
+            const d=await fetch(url).then(r=>r.json()).catch(()=>[]);
+            if(d&&d[0]) return d;
+          }
+          return geoR(q);
+        };
+        await sleep(300);
         for(let ai=0;ai<newActs.length;ai++){
           const act=newActs[ai];
-          const q=(act.address?act.address+", ":"")+act.name+", "+dest;
-          const d=await geo(q);
-          let lat,lng;
-          if(d&&d[0]){lat=+d[0].lat;lng=+d[0].lon;}
-          else if(cityCenter){lat=cityCenter.lat+0.002*(ai+1);lng=cityCenter.lng+0.002*(ai+1);}
-          if(lat!==undefined){
-            const actId=act._id;
+          const q=act.name+(act.address?", "+act.address:"")+", "+dest;
+          const d=await geoLocal(q);
+          if(d&&d[0]){
+            const lat=+d[0].lat,lng=+d[0].lon,actId=act._id;
             replaceDays(prev=>prev.map((dd,i)=>i!==dIdx?dd:{
               ...dd,activities:dd.activities.map(a=>a._id===actId?{...a,lat,lng}:a)
             }));
@@ -2414,33 +2397,48 @@ function Trip({data,form,onBack,onSave,onShare}){
   const acts=day.activities||[];
   const totalDays=days.length;
 
-  // ── Background geocoding: store lat/lng in every activity right after trip loads ──
+  // ── Background geocoding: store accurate lat/lng in every activity after trip loads ──
   const bgGeoRunRef=useRef(false);
   useEffect(()=>{
     if(bgGeoRunRef.current) return;
     bgGeoRunRef.current=true;
     const dest=data.destination;
     if(!dest) return;
-    const geo=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
     const sleep=(ms)=>new Promise(res=>setTimeout(res,ms));
+    const geo=(q)=>fetch("https://nominatim.openstreetmap.org/search?format=json&limit=3&q="+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[]);
     let cancelled=false;
     async function run(){
-      await sleep(800); // let the map finish its initial render first
-      let cityCenter=null;
+      await sleep(800); // let map finish initial render first
+      // Geocode city to build a viewbox — keeps all results inside the right city
       const cityData=await geo(dest);
-      if(cityData&&cityData[0]) cityCenter={lat:+cityData[0].lat,lng:+cityData[0].lon};
+      if(cancelled) return;
+      let cityCenter=null;
+      let viewbox=null;
+      if(cityData&&cityData[0]){
+        cityCenter={lat:+cityData[0].lat,lng:+cityData[0].lon};
+        viewbox=`${cityCenter.lng-0.15},${cityCenter.lat+0.15},${cityCenter.lng+0.15},${cityCenter.lat-0.15}`;
+      }
+      const geoLocal=async(q)=>{
+        if(viewbox){
+          const url=`https://nominatim.openstreetmap.org/search?format=json&limit=3&q=${encodeURIComponent(q)}&viewbox=${viewbox}&bounded=1`;
+          const d=await fetch(url).then(r=>r.json()).catch(()=>[]);
+          if(d&&d[0]) return d;
+        }
+        return geo(q); // fallback: unbounded global search
+      };
+      await sleep(300);
       for(let di=0;di<days.length;di++){
         const dayActs=(days[di].activities||[]);
         for(let ai=0;ai<dayActs.length;ai++){
           if(cancelled) return;
           const act=dayActs[ai];
           if(act.lat&&act.lng){continue;} // already geocoded — skip
-          const q=(act.address?act.address+", ":"")+act.name+", "+dest;
-          const d=await geo(q);
-          let lat,lng;
-          if(d&&d[0]){lat=+d[0].lat;lng=+d[0].lon;}
-          else if(cityCenter){const off=0.002*(ai+1);lat=cityCenter.lat+off;lng=cityCenter.lng+off;}
-          if(lat!==undefined){
+          // Name-first query is most accurate for Nominatim
+          const q=act.name+(act.address?", "+act.address:"")+", "+dest;
+          const d=await geoLocal(q);
+          if(cancelled) return;
+          if(d&&d[0]){
+            const lat=+d[0].lat,lng=+d[0].lon;
             const actId=act._id||act.name;
             const dIdx=di;
             replaceDays(prev=>prev.map((dd,i)=>i!==dIdx?dd:{
@@ -2448,13 +2446,14 @@ function Trip({data,form,onBack,onSave,onShare}){
               activities:dd.activities.map(a=>(a._id||a.name)===actId?{...a,lat,lng}:a)
             }));
           }
+          // No city-center-offset fallback — wrong pin is worse than missing pin
           await sleep(300);
         }
       }
     }
     run();
     return()=>{cancelled=true;};
-  },[]); // runs once on mount (Trip unmounts/remounts for each new trip)
+  },[]); // runs once on mount
 
   function removeAct(id){ removeActivity(activeDay,id); }
   function addAct(a){ addActivity(activeDay,a); }
