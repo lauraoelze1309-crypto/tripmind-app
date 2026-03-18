@@ -1291,55 +1291,8 @@ function Setup({onGenerate,savedTrips,setSavedTrips,onLoadTrip}){
           <textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={3} placeholder="Dietary needs, must-see places…" style={{width:"100%",padding:"12px",background:"#EEE8DF",border:"1.5px solid #C8D9E6",borderRadius:10,fontFamily:"inherit"}}/>
         </Crd>
         <Btn full onClick={()=>form.destination.trim()&&onGenerate(form)} disabled={!form.destination.trim()} color="#2F4156">
-          {form.destination.trim()?"✈️ Generate My Itinerary":"Enter a destination to start"}
+          {form.destination.trim()?"✈️ Itinerary generieren":"Ziel eingeben um zu starten"}
         </Btn>
-        {savedTrips.length>0&&<div style={{marginTop:24}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-            <Lbl c="Your Trip Library"/>
-            <span style={{fontSize:".65rem",color:"#8A9CAA",fontWeight:600}}>{savedTrips.length} trip{savedTrips.length!==1?"s":""}</span>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {savedTrips.map(t=>{
-              const members=t.members||[{name:"You",avatar:"👤"}];
-              return(
-                <div key={t.id} style={{background:"#fff",border:"1px solid #C8D9E6",borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(47,65,86,.07)"}}>
-                  {/* Hero thumbnail */}
-                  <div style={{height:64,background:`linear-gradient(rgba(44,54,90,.55),rgba(44,54,90,.55)),url(${heroImg(t.destination)}) center/cover`,position:"relative"}}>
-                    <div style={{position:"absolute",bottom:8,left:12,color:"#fff",fontWeight:800,fontSize:".88rem",textShadow:"0 1px 4px rgba(0,0,0,.5)"}}>✈️ {t.destination}</div>
-                    <button onClick={e=>{
-                      e.stopPropagation();
-                      setSavedTrips(p=>p.filter(x=>x.id!==t.id));
-                    }} style={{position:"absolute",top:6,right:8,width:24,height:24,borderRadius:"50%",background:"rgba(0,0,0,.4)",border:"none",color:"rgba(255,255,255,.8)",fontSize:".75rem",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>×</button>
-                  </div>
-                  <div style={{padding:"10px 13px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
-                    <div onClick={()=>onLoadTrip(t)} style={{cursor:"pointer",flex:1,minWidth:0}}>
-                      <div style={{fontSize:".72rem",color:"#8A9CAA",marginBottom:3}}>{t._date} · {t.days?.length||"?"} days</div>
-                      {/* Member avatars */}
-                      <div style={{display:"flex",alignItems:"center",gap:2}}>
-                        {members.slice(0,5).map((m,idx)=>(
-                          <div key={idx} title={m.name} style={{width:22,height:22,borderRadius:"50%",background:"#2F4156",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".62rem",fontWeight:700,border:"1.5px solid #fff",marginLeft:idx>0?-6:0,zIndex:5-idx,flexShrink:0}}>
-                            {m.avatar||(m.name||"?")[0].toUpperCase()}
-                          </div>
-                        ))}
-                        {members.length>5&&<span style={{fontSize:".6rem",color:"#8A9CAA",marginLeft:4}}>+{members.length-5}</span>}
-                        <span style={{fontSize:".68rem",color:"#567C8D",marginLeft:6,fontWeight:600}}>{members.length} traveller{members.length!==1?"s":""}</span>
-                      </div>
-                    </div>
-                    <button onClick={e=>{
-                      e.stopPropagation();
-                      const tripData=JSON.stringify(t);
-                      localStorage.setItem("tm_invite_"+t.id, tripData);
-                      const url=window.location.origin+window.location.pathname+"?joinTrip="+t.id;
-                      navigator.clipboard?.writeText(url).then(()=>alert("Invite link copied! Send it to your friends.")).catch(()=>prompt("Copy this link:",url));
-                    }} style={{padding:"7px 13px",background:"#2F4156",border:"none",borderRadius:9,fontSize:".72rem",fontWeight:700,color:"#fff",fontFamily:"inherit",whiteSpace:"nowrap",cursor:"pointer",minHeight:34}}>
-                      👥 Invite
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>}
       </div>
     </div>
   );
@@ -3565,6 +3518,100 @@ function SetupKeyScreen({onDone}){
 // ── Root / Generation ──────────────────────────────────────────────────────────
 // Long trips strategy: generate meta once, then days in small batches of 3
 // Each batch is one callAI that returns multiple days at once → far fewer API calls
+// ── Bottom Navigation Bar ──────────────────────────────────────────────────────
+function BottomNav({tab,setTab,tripsCount}){
+  const tabs=[
+    {id:"home",icon:"✈️",label:"Neue Reise"},
+    {id:"trips",icon:"🧳",label:"Meine Reisen",badge:tripsCount||null},
+  ];
+  return(
+    <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:300,background:"rgba(255,255,255,.97)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",borderTop:"1px solid #C8D9E6",padding:"8px 16px calc(8px + env(safe-area-inset-bottom))"}}>
+      <div style={{maxWidth:600,margin:"0 auto",display:"flex",gap:6}}>
+        {tabs.map(({id,icon,label,badge})=>(
+          <button key={id} onClick={()=>setTab(id)}
+            style={{flex:1,padding:"10px 8px 8px",borderRadius:14,border:"none",fontFamily:"inherit",cursor:"pointer",
+              background:tab===id?"#2F4156":"transparent",
+              color:tab===id?"#fff":"#8A9CAA",
+              transition:"all .18s",position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+            <span style={{fontSize:"1.35rem",lineHeight:1}}>{icon}</span>
+            <span style={{fontSize:".68rem",fontWeight:tab===id?700:500,letterSpacing:".01em",whiteSpace:"nowrap"}}>{label}</span>
+            {badge&&<span style={{position:"absolute",top:7,right:"calc(50% - 20px)",minWidth:17,height:17,borderRadius:999,background:"#dc2626",color:"#fff",fontSize:".58rem",fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px"}}>{badge}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── My Trips Screen ────────────────────────────────────────────────────────────
+function MyTripsScreen({savedTrips,setSavedTrips,onLoadTrip}){
+  return(
+    <div style={{minHeight:"100vh",background:"#F5EFEB",fontFamily:"'Segoe UI',system-ui,sans-serif",paddingBottom:100}}>
+      <style>{CSS}</style>
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg,#2C365A,#2F4156)",padding:"32px 18px 28px",textAlign:"center"}}>
+        <div style={{fontSize:".67rem",letterSpacing:".16em",textTransform:"uppercase",color:"rgba(255,255,255,.7)",fontWeight:600,marginBottom:10}}>Deine Abenteuer</div>
+        <h1 style={{fontSize:"clamp(1.7rem,5vw,2.2rem)",fontWeight:900,letterSpacing:"-.03em",color:"#fff",marginBottom:8}}>🧳 Meine Reisen</h1>
+        <p style={{color:"rgba(255,255,255,.75)",fontSize:".88rem"}}>{savedTrips.length} gespeicherte Reise{savedTrips.length!==1?"n":""}</p>
+      </div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"18px 14px"}}>
+        {savedTrips.length===0?(
+          <div style={{textAlign:"center",padding:"60px 24px",display:"flex",flexDirection:"column",alignItems:"center",gap:14}}>
+            <div style={{fontSize:"4rem"}}>🗺️</div>
+            <div style={{fontWeight:900,fontSize:"1.15rem",color:"#2F4156"}}>Noch keine Reisen gespeichert</div>
+            <div style={{fontSize:".88rem",color:"#567C8D",maxWidth:260,lineHeight:1.5}}>Erstelle deine erste Reise — sie erscheint dann hier.</div>
+          </div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            {savedTrips.map(t=>{
+              const members=t.members||[{name:"You",avatar:"👤"}];
+              const totalDays=t.days?.length||"?";
+              return(
+                <div key={t.id} onClick={()=>onLoadTrip(t)}
+                  style={{background:"#fff",border:"1px solid #C8D9E6",borderRadius:18,overflow:"hidden",boxShadow:"0 3px 14px rgba(47,65,86,.10)",cursor:"pointer"}}>
+                  {/* Hero image */}
+                  <div style={{height:130,backgroundImage:`linear-gradient(rgba(44,54,90,.45),rgba(44,54,90,.72)),url(${heroImg(t.destination)})`,backgroundSize:"cover",backgroundPosition:"center",position:"relative",display:"flex",alignItems:"flex-end",padding:"14px 16px"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:"rgba(255,255,255,.75)",fontSize:".65rem",fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",marginBottom:4}}>{t._date}</div>
+                      <div style={{color:"#fff",fontWeight:900,fontSize:"1.18rem",textShadow:"0 2px 8px rgba(0,0,0,.4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>✈️ {t.destination}</div>
+                    </div>
+                    <button onClick={e=>{
+                      e.stopPropagation();
+                      setSavedTrips(p=>p.filter(x=>x.id!==t.id));
+                    }} style={{flexShrink:0,width:32,height:32,borderRadius:"50%",background:"rgba(0,0,0,.45)",border:"none",color:"rgba(255,255,255,.85)",fontSize:".9rem",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginLeft:8}}>×</button>
+                  </div>
+                  {/* Info row */}
+                  <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:".8rem",color:"#2F4156",fontWeight:700,background:"#EEE8DF",padding:"3px 10px",borderRadius:20}}>📅 {totalDays} Tage</span>
+                      <div style={{display:"flex",alignItems:"center"}}>
+                        {members.slice(0,4).map((m,idx)=>(
+                          <div key={idx} title={m.name} style={{width:26,height:26,borderRadius:"50%",background:"#2F4156",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".65rem",fontWeight:800,border:"2.5px solid #fff",marginLeft:idx>0?-9:0,zIndex:4-idx,flexShrink:0}}>
+                            {m.avatar||(m.name||"?")[0].toUpperCase()}
+                          </div>
+                        ))}
+                        {members.length>4&&<span style={{fontSize:".62rem",color:"#8A9CAA",marginLeft:5}}>+{members.length-4}</span>}
+                      </div>
+                    </div>
+                    <button onClick={e=>{
+                      e.stopPropagation();
+                      localStorage.setItem("tm_invite_"+t.id,JSON.stringify(t));
+                      const url=window.location.origin+window.location.pathname+"?joinTrip="+t.id;
+                      navigator.clipboard?.writeText(url).then(()=>alert("✅ Invite-Link kopiert!")).catch(()=>prompt("Link kopieren:",url));
+                    }} style={{padding:"7px 12px",background:"#2F4156",border:"none",borderRadius:10,fontSize:".72rem",fontWeight:700,color:"#fff",fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                      👥 Einladen
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [screen,setScreen]=useState("setup");
   const [loadMsg,setLoadMsg]=useState("Starting…");
@@ -3576,6 +3623,7 @@ export default function App(){
     try{ const s=localStorage.getItem("tm_saved"); return s?JSON.parse(s):[]; }catch(_){ return []; }
   });
   const [needsSetup,setNeedsSetup]=useState(false);
+  const [bottomTab,setBottomTab]=useState("home");
   // ── Join flow: replaces window.prompt ─────────────────────────────────────
   const [joinData,setJoinData]=useState(null); // {trip, joinId}
   // Auto-persist savedTrips to localStorage
@@ -3845,7 +3893,7 @@ async function fetchRealWeather(destination, startDate, totalDays){
   }
 
   if(screen==="loading") return <Loading msg={loadMsg} pct={pct}/>;
-  if(screen==="trip"&&itinerary) return <Trip data={itinerary} form={currentForm} onBack={()=>setScreen("setup")} onSave={saveTrip} onShare={shareTrip}/>;
+  if(screen==="trip"&&itinerary) return <Trip data={itinerary} form={currentForm} onBack={()=>{setScreen("setup");setBottomTab("trips");}} onSave={saveTrip} onShare={shareTrip}/>;
   if(screen==="error") return(
     <div style={{minHeight:"100vh",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"'Segoe UI',system-ui,sans-serif",padding:24,gap:18,textAlign:"center"}}>
       <style>{CSS}</style>
@@ -3856,6 +3904,13 @@ async function fetchRealWeather(destination, startDate, totalDays){
       <Btn onClick={()=>setScreen("setup")} color="#2F4156">← Try Again</Btn>
     </div>
   );
-  return <Setup onGenerate={generate} savedTrips={savedTrips} setSavedTrips={setSavedTrips} onLoadTrip={t=>{setItinerary(t);setCurrentForm(t._form||{});setScreen("trip");}}/>;
+  const handleLoadTrip=(t)=>{setItinerary(t);setCurrentForm(t._form||{});setScreen("trip");};
+  return(
+    <div style={{paddingBottom:72}}>
+      {bottomTab==="home"&&<Setup onGenerate={generate} savedTrips={savedTrips} setSavedTrips={setSavedTrips} onLoadTrip={handleLoadTrip}/>}
+      {bottomTab==="trips"&&<MyTripsScreen savedTrips={savedTrips} setSavedTrips={setSavedTrips} onLoadTrip={handleLoadTrip}/>}
+      <BottomNav tab={bottomTab} setTab={setBottomTab} tripsCount={savedTrips.length}/>
+    </div>
+  );
 }
 
