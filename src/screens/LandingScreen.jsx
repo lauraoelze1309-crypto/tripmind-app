@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { CSS } from '../constants/css.js';
 import { DestPhotoBg } from '../hooks/useDestImg.js';
+import { hashPw, verifyPw } from '../utils/auth.js';
 
 export function LandingScreen({onEnter}){
   const [leaving,setLeaving]=useState(false);
@@ -84,7 +85,7 @@ export function LandingScreen({onEnter}){
   }
 
   const INP={width:"100%",padding:"13px 15px",borderRadius:12,background:"rgba(255,255,255,.14)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",fontSize:".95rem",fontFamily:"inherit",outline:"none",marginBottom:10};
-  const BTN_PRI={width:"100%",padding:"15px",borderRadius:14,marginTop:4,background:"var(--tm-bg)",border:"none",color:"#1a2a1a",fontWeight:800,fontSize:"1rem",fontFamily:"inherit",cursor:"pointer",boxShadow:"0 4px 20px rgba(0,0,0,.25)",opacity:loading?.6:1};
+  const BTN_PRI={width:"100%",padding:"15px",borderRadius:14,marginTop:4,background:"#fff",border:"none",color:"#1a2a1a",fontWeight:800,fontSize:"1rem",fontFamily:"inherit",cursor:"pointer",boxShadow:"0 4px 20px rgba(0,0,0,.25)",opacity:loading?.6:1};
   const BACK={background:"none",border:"none",color:"rgba(255,255,255,.5)",fontSize:".8rem",fontFamily:"inherit",cursor:"pointer",marginTop:12,display:"block",width:"100%",textAlign:"center",padding:"6px 0"};
   const LABEL={fontSize:".72rem",fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",color:"rgba(255,255,255,.5)",marginBottom:6,display:"block"};
 
@@ -117,7 +118,7 @@ export function LandingScreen({onEnter}){
               <div style={{fontSize:".74rem",fontWeight:600,color:"rgba(255,255,255,.5)",textAlign:"center",letterSpacing:".07em",textTransform:"uppercase",marginBottom:16}}>Your next adventure awaits</div>
               <div style={{display:"flex",gap:10,marginBottom:12}}>
                 <button onClick={()=>goStep("login")} style={{flex:1,padding:"15px 10px",borderRadius:14,background:"rgba(255,255,255,.15)",border:"1.5px solid rgba(255,255,255,.26)",color:"#fff",fontWeight:700,fontSize:".95rem",fontFamily:"inherit",cursor:"pointer"}}>Log in</button>
-                <button onClick={()=>goStep("signup-email")} style={{flex:1,padding:"15px 10px",borderRadius:14,background:"var(--tm-bg)",border:"none",color:"#1a2a1a",fontWeight:800,fontSize:".95rem",fontFamily:"inherit",cursor:"pointer",boxShadow:"0 4px 20px rgba(0,0,0,.3)"}}>Sign up — free</button>
+                <button onClick={()=>goStep("signup-email")} style={{flex:1,padding:"15px 10px",borderRadius:14,background:"#fff",border:"none",color:"#1a2a1a",fontWeight:800,fontSize:".95rem",fontFamily:"inherit",cursor:"pointer",boxShadow:"0 4px 20px rgba(0,0,0,.3)"}}>Sign up — free</button>
               </div>
               <div style={{textAlign:"center",fontSize:".68rem",color:"rgba(255,255,255,.28)",letterSpacing:".02em"}}>No credit card required</div>
             </>
